@@ -5,6 +5,7 @@ import SessionsList from './pages/SessionsList'
 import SessionDetail from './pages/SessionDetail'
 import Login from './pages/Login'
 import RosterManager from './pages/RosterManager'
+import AttendanceSheet from './pages/AttendanceSheet'
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -27,6 +28,7 @@ export default function App() {
     <BrowserRouter>
       <nav>
         <Link to="/">Sessions</Link>
+        <Link to="/attendance-sheet">Attendance Sheet</Link>
         {session && <Link to="/roster">Roster</Link>}
         <div className="spacer" />
         {session ? (
@@ -39,6 +41,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<SessionsList />} />
           <Route path="/session" element={<SessionDetail />} />
+          <Route path="/attendance-sheet" element={<AttendanceSheet />} />
           <Route path="/login" element={session ? <Navigate to="/roster" /> : <Login />} />
           <Route
             path="/roster"
