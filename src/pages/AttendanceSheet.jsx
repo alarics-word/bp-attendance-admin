@@ -15,6 +15,7 @@ export default function AttendanceSheet() {
   const [excusedSet, setExcusedSet] = useState(new Set()) // `${date}|${id}`
   const [loading, setLoading] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setIsAdmin(!!data.session))
@@ -97,15 +98,23 @@ export default function AttendanceSheet() {
     load()
   }
 
+  const filteredStudents = useMemo(() => {
+    if (!search.trim()) return students
+    const q = search.trim().toLowerCase()
+    return students.filter(
+      (s) => s.name.toLowerCase().includes(q) || s.id_number.toLowerCase().includes(q)
+    )
+  }, [students, search])
+
   const grouped = useMemo(() => {
     const groups = {}
-    for (const s of students) {
+    for (const s of filteredStudents) {
       const key = `${s.dept || 'Unknown Dept'} — Year ${s.year || '?'}`
       if (!groups[key]) groups[key] = []
       groups[key].push(s)
     }
     return groups
-  }, [students])
+  }, [filteredStudents])
 
   function exportExcel() {
     const wb = XLSX.utils.book_new()
@@ -206,6 +215,13 @@ export default function AttendanceSheet() {
         <h2>Attendance Sheet — Yells Practice</h2>
         <button onClick={exportExcel}>Download Excel</button>
       </div>
+
+      <input
+        placeholder="Search by name or ID..."
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        style={{ marginBottom: 12, maxWidth: 320 }}
+      />
 
       {isAdmin && (
         <p style={{ color: '#666', fontSize: 13 }}>

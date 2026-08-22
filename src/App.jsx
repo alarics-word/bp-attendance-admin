@@ -6,6 +6,7 @@ import SessionDetail from './pages/SessionDetail'
 import Login from './pages/Login'
 import RosterManager from './pages/RosterManager'
 import AttendanceSheet from './pages/AttendanceSheet'
+import ManageSessions from './pages/ManageSessions'
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -30,6 +31,7 @@ export default function App() {
         <Link to="/">Sessions</Link>
         <Link to="/attendance-sheet">Attendance Sheet</Link>
         {session && <Link to="/roster">Roster</Link>}
+        {session && <Link to="/manage-sessions">Manage Sessions</Link>}
         <div className="spacer" />
         {session ? (
           <button onClick={() => supabase.auth.signOut()}>Log out</button>
@@ -46,6 +48,10 @@ export default function App() {
           <Route
             path="/roster"
             element={session ? <RosterManager /> : <Navigate to="/login" />}
+          />
+          <Route
+            path="/manage-sessions"
+            element={session ? <ManageSessions /> : <Navigate to="/login" />}
           />
         </Routes>
       </div>
