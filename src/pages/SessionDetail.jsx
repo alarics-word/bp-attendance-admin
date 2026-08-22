@@ -12,7 +12,12 @@ export default function SessionDetail() {
   const [isAdmin, setIsAdmin] = useState(false)
 
   const [showAddForm, setShowAddForm] = useState(false)
-  const [form, setForm] = useState({ id_number: '', name: '', dept: '', year: '' })
+  const [search, setSearch] = useState('')
+  const [results, setResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [selectedStudent, setSelectedStudent] = useState(null) // existing roster match
+  const [manualForm, setManualForm] = useState({ id_number: '', name: '', dept: '', year: '' })
+  const [showManualForm, setShowManualForm] = useState(false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -23,6 +28,26 @@ export default function SessionDetail() {
   useEffect(() => {
     load()
   }, [sessionName, date])
+
+  // Live search the roster as the admin types (name or ID)
+  useEffect(() => {
+    const q = search.trim()
+    if (q.length < 2) {
+      setResults([])
+      return
+    }
+    setSearching(true)
+    const timeout = setTimeout(async () => {
+      const { data } = await supabase
+        .from('students')
+        .select('id_number, name, dept, year')
+        .or(`name.ilike.%${q}%,id_number.ilike.%${q}%`)
+        .limit(8)
+      setResults(data ?? [])
+      setSearching(false)
+    }, 300)
+    return () => clearTimeout(timeout)
+  }, [search])
 
   async function load() {
     setLoading(true)
@@ -37,42 +62,21 @@ export default function SessionDetail() {
     setLoading(false)
   }
 
-  async function handleAdd(e) {
-    e.preventDefault()
+  function resetAddFlow() {
+    setSearch('')
+    setResults([])
+    setSelectedStudent(null)
+    setShowManualForm(false)
+    setManualForm({ id_number: '', name: '', dept: '', year: '' })
     setError('')
+    setShowAddForm(false)
+  }
 
-    if (!form.id_number || !form.name) {
-      setError('ID and name are required.')
-      return
-    }
-
+  async function addToSession(studentId) {
+    setError('')
     setSaving(true)
 
-    // Make sure the student exists in the roster (add them if not,
-    // e.g. someone who forgot their ID and doesn't have a barcode
-    // on file yet). Won't overwrite an existing student's info.
-    const { data: existing } = await supabase
-      .from('students')
-      .select('id_number')
-      .eq('id_number', form.id_number)
-      .maybeSingle()
-
-    if (!existing) {
-      const { error: studentError } = await supabase.from('students').insert({
-        id_number: form.id_number,
-        name: form.name,
-        dept: form.dept,
-        year: form.year,
-      })
-      if (studentError) {
-        setError(studentError.message)
-        setSaving(false)
-        return
-      }
-    }
-
-    // Make sure the session row exists (in case this session was
-    // never synced from a taker's phone for some reason)
+    // Make sure the session row exists
     await supabase
       .from('sessions')
       .upsert({ session_name: sessionName, date }, { onConflict: 'session_name,date' })
@@ -80,7 +84,7 @@ export default function SessionDetail() {
     const { error: attendanceError } = await supabase.from('attendance_records').insert({
       session_name: sessionName,
       date,
-      student_id: form.id_number,
+      student_id: studentId,
       is_manual: true,
     })
 
@@ -91,9 +95,40 @@ export default function SessionDetail() {
       return
     }
 
-    setForm({ id_number: '', name: '', dept: '', year: '' })
-    setShowAddForm(false)
+    resetAddFlow()
     load()
+  }
+
+  async function handleAddExisting() {
+    if (!selectedStudent) return
+    await addToSession(selectedStudent.id_number)
+  }
+
+  async function handleAddManual(e) {
+    e.preventDefault()
+    setError('')
+
+    if (!manualForm.id_number || !manualForm.name) {
+      setError('ID and name are required.')
+      return
+    }
+
+    setSaving(true)
+
+    const { error: studentError } = await supabase.from('students').insert({
+      id_number: manualForm.id_number,
+      name: manualForm.name,
+      dept: manualForm.dept,
+      year: manualForm.year,
+    })
+    if (studentError) {
+      setError(studentError.message)
+      setSaving(false)
+      return
+    }
+
+    setSaving(false)
+    await addToSession(manualForm.id_number)
   }
 
   async function handleDelete(studentId) {
@@ -122,44 +157,131 @@ export default function SessionDetail() {
           {!showAddForm ? (
             <button onClick={() => setShowAddForm(true)}>+ Add student to this session</button>
           ) : (
-            <form onSubmit={handleAdd}>
-              <div className="form-row">
-                <input
-                  placeholder="ID number"
-                  value={form.id_number}
-                  onChange={(e) => setForm({ ...form, id_number: e.target.value })}
-                />
-                <input
-                  placeholder="Name"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                />
-                <input
-                  placeholder="Dept"
-                  value={form.dept}
-                  onChange={(e) => setForm({ ...form, dept: e.target.value })}
-                />
-                <input
-                  placeholder="Year"
-                  value={form.year}
-                  onChange={(e) => setForm({ ...form, year: e.target.value })}
-                />
-              </div>
-              <button type="submit" disabled={saving}>
-                {saving ? 'Adding...' : 'Add to session'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAddForm(false)
-                  setError('')
-                }}
-                style={{ marginLeft: 8, background: '#999' }}
-              >
-                Cancel
-              </button>
-              {error && <div className="error">{error}</div>}
-            </form>
+            <div>
+              {!showManualForm ? (
+                <>
+                  <input
+                    placeholder="Search by name or ID..."
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value)
+                      setSelectedStudent(null)
+                    }}
+                    autoFocus
+                  />
+
+                  {searching && <p style={{ fontSize: 13, color: '#666' }}>Searching...</p>}
+
+                  {!selectedStudent && results.length > 0 && (
+                    <div style={{ marginTop: 8 }}>
+                      {results.map((s) => (
+                        <div
+                          key={s.id_number}
+                          onClick={() => {
+                            setSelectedStudent(s)
+                            setSearch(s.name)
+                            setResults([])
+                          }}
+                          style={{
+                            padding: '8px 10px',
+                            border: '1px solid #eee',
+                            borderRadius: 6,
+                            marginBottom: 4,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <b>{s.name}</b> — {s.id_number} &middot; {s.dept} &middot; Yr {s.year}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {!selectedStudent && !searching && search.trim().length >= 2 && results.length === 0 && (
+                    <p style={{ fontSize: 13, color: '#666', marginTop: 8 }}>
+                      No match found in roster.{' '}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowManualForm(true)
+                          setManualForm({ id_number: '', name: search, dept: '', year: '' })
+                        }}
+                      >
+                        Add new student
+                      </button>
+                    </p>
+                  )}
+
+                  {selectedStudent && (
+                    <div className="card" style={{ marginTop: 8 }}>
+                      <p>
+                        <b>{selectedStudent.name}</b> — {selectedStudent.id_number}
+                        <br />
+                        {selectedStudent.dept} &middot; Year {selectedStudent.year}
+                      </p>
+                      <button onClick={handleAddExisting} disabled={saving}>
+                        {saving ? 'Adding...' : 'Add to session'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedStudent(null)
+                          setSearch('')
+                        }}
+                        style={{ marginLeft: 8, background: '#999' }}
+                      >
+                        Change
+                      </button>
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: 8 }}>
+                    <button type="button" onClick={resetAddFlow} style={{ background: '#999' }}>
+                      Cancel
+                    </button>
+                  </div>
+                  {error && <div className="error">{error}</div>}
+                </>
+              ) : (
+                <form onSubmit={handleAddManual}>
+                  <p style={{ fontSize: 13, color: '#666' }}>
+                    Not in the roster yet — enter their details (e.g. wrote it on paper):
+                  </p>
+                  <div className="form-row">
+                    <input
+                      placeholder="ID number"
+                      value={manualForm.id_number}
+                      onChange={(e) => setManualForm({ ...manualForm, id_number: e.target.value })}
+                    />
+                    <input
+                      placeholder="Name"
+                      value={manualForm.name}
+                      onChange={(e) => setManualForm({ ...manualForm, name: e.target.value })}
+                    />
+                    <input
+                      placeholder="Dept"
+                      value={manualForm.dept}
+                      onChange={(e) => setManualForm({ ...manualForm, dept: e.target.value })}
+                    />
+                    <input
+                      placeholder="Year"
+                      value={manualForm.year}
+                      onChange={(e) => setManualForm({ ...manualForm, year: e.target.value })}
+                    />
+                  </div>
+                  <button type="submit" disabled={saving}>
+                    {saving ? 'Adding...' : 'Add to session'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowManualForm(false)}
+                    style={{ marginLeft: 8, background: '#999' }}
+                  >
+                    Back to search
+                  </button>
+                  {error && <div className="error">{error}</div>}
+                </form>
+              )}
+            </div>
           )}
         </div>
       )}
